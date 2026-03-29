@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CranialAI — Clinical Diagnostic Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg2: #111620;
+    --bg3: #1a1f2e;
+    --border: rgba(255,255,255,0.06);
+    --text: #e4e4e7;
+    --text2: #8b8d98;
+    --text3: #5a5c66;
+    --blue: #3b82f6;
+    --blue-dim: rgba(59,130,246,0.12);
+    --red: #ef4444;
+    --red-dim: rgba(239,68,68,0.12);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.12);
+    --green: #22c55e;
+    --green-dim: rgba(34,197,94,0.12);
+    --teal: #14b8a6;
+    --teal-dim: rgba(20,184,166,0.12);
+    --purple: #a78bfa;
+    --purple-dim: rgba(167,139,250,0.12);
+    --radius: 10px;
+    --font: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 13px; padding: 24px; }
+
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .header h1 { font-size: 16px; font-weight: 600; }
+  .header h1 span { color: var(--teal); }
+  .badge { padding: 4px 12px; border-radius: 20px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; }
+
+  .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 12px; margin-bottom: 16px; }
+
+  .metric { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .metric .label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
+  .metric .value { font-size: 22px; font-weight: 600; }
+  .metric .sub { font-size: 10px; color: var(--text2); margin-top: 4px; }
+
+  .panel { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .panel-title { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; }
+
+  .scan-selector { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .scan-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-family: var(--font); font-size: 11px; transition: all 0.15s; }
+  .scan-btn:hover { border-color: var(--teal); color: var(--teal); }
+  .scan-btn.active { background: var(--teal-dim); border-color: var(--teal); color: var(--teal); }
+
+  .voxel-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .voxel-slice { aspect-ratio: 1; border-radius: 4px; overflow: hidden; position: relative; }
+  .voxel-slice canvas { width: 100%; height: 100%; }
+
+  .report-section { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+  .report-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+  .report-row .rl { color: var(--text2); }
+
+  .pipeline-stage { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 6px; margin-bottom: 4px; font-size: 12px; }
+  .pipeline-arrow { text-align: center; color: var(--text3); font-size: 10px; margin: 2px 0; }
+
+  .conf-bar { height: 8px; border-radius: 4px; background: var(--bg); overflow: hidden; margin-top: 6px; }
+  .conf-fill { height: 100%; border-radius: 4px; transition: width 0.5s, background 0.3s; }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+  .analyzing { animation: pulse 1.2s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>&#9651;</span> CranialAI <span style="color:var(--text3);font-weight:400;">— Clinical Diagnostic Dashboard</span></h1>
+  <div class="badge" id="status" style="background:var(--teal-dim);color:var(--teal);">READY</div>
+</div>
+
+<div class="scan-selector" id="scan-selector"></div>
+
+<div class="grid-4">
+  <div class="metric">
+    <div class="label">Cephalic index</div>
+    <div class="value" id="m-ci">—</div>
+    <div class="sub">Width / Length × 100</div>
+  </div>
+  <div class="metric">
+    <div class="label">Classification</div>
+    <div class="value" id="m-class" style="font-size:16px;">—</div>
+    <div class="sub" id="m-class-sub">Awaiting scan</div>
+  </div>
+  <div class="metric">
+    <div class="label">Model confidence</div>
+    <div class="value" id="m-conf">—</div>
+    <div class="conf-bar"><div class="conf-fill" id="conf-fill" style="width:0;background:var(--text3);"></div></div>
+  </div>
+  <div class="metric">
+    <div class="label">Risk level</div>
+    <div class="value" id="m-risk">—</div>
+    <div class="sub" id="m-recommend">—</div>
+  </div>
+</div>
+
+<div class="grid-3">
+  <div class="panel">
+    <div class="panel-title">Voxel cross-sections (axial slices)</div>
+    <div class="voxel-grid" id="voxel-grid"></div>
+    <div style="margin-top:8px;font-size:10px;color:var(--text3);">Slices at z = 6, 10, 16, 22, 26</div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Model comparison — validation accuracy</div>
+    <div style="position:relative;height:240px;"><canvas id="modelChart"></canvas></div>
+    <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--text2);">
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#3b82f6;margin-right:4px;"></span>3D CNN</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#a78bfa;margin-right:4px;"></span>3D ResNet</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#14b8a6;margin-right:4px;"></span>3D DenseNet</span>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Diagnostic pipeline</div>
+    <div id="pipeline"></div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-title">MC dropout uncertainty distribution (50 forward passes)</div>
+    <div style="position:relative;height:200px;"><canvas id="mcChart"></canvas></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Clinical report</div>
+    <div id="report"></div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:12px;">
+  <div class="panel-title">Grad-CAM attention summary</div>
+  <div id="gradcam" style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;"></div>
+</div>
+
+<script>
+const PATIENTS = [
+  { id: 'P-1042', type: 'N', ci: 78.3, width: 134.2, length: 171.4, height: 122.8, asym: 1.02, conf: 0.94, risk: 'LOW', mc_std: 0.031, probs: { N: 0.91, BP: 0.04, P: 0.03, D: 0.02 }, gradcam: { anterior: 0.12, posterior: 0.15, left: 0.18, right: 0.19, superior: 0.21, inferior: 0.08 } },
+  { id: 'P-2087', type: 'BP', ci: 88.7, width: 152.1, length: 171.5, height: 118.4, asym: 1.03, conf: 0.87, risk: 'MODERATE', mc_std: 0.072, probs: { N: 0.06, BP: 0.84, P: 0.07, D: 0.03 }, gradcam: { anterior: 0.35, posterior: 0.42, left: 0.28, right: 0.31, superior: 0.15, inferior: 0.22 } },
+  { id: 'P-3156', type: 'P', ci: 79.1, width: 138.5, length: 175.1, height: 124.2, asym: 1.12, conf: 0.72, risk: 'MODERATE', mc_std: 0.145, probs: { N: 0.14, BP: 0.08, P: 0.68, D: 0.10 }, gradcam: { anterior: 0.18, posterior: 0.12, left: 0.52, right: 0.11, superior: 0.14, inferior: 0.16 } },
+  { id: 'P-4201', type: 'D', ci: 69.4, width: 121.3, length: 174.8, height: 126.1, asym: 1.01, conf: 0.91, risk: 'MODERATE', mc_std: 0.048, probs: { N: 0.04, BP: 0.02, P: 0.03, D: 0.91 }, gradcam: { anterior: 0.41, posterior: 0.38, left: 0.15, right: 0.16, superior: 0.12, inferior: 0.35 } },
+  { id: 'P-5099', type: 'BP', ci: 92.1, width: 158.4, length: 171.9, height: 112.7, asym: 1.04, conf: 0.56, risk: 'HIGH', mc_std: 0.218, probs: { N: 0.12, BP: 0.52, P: 0.22, D: 0.14 }, gradcam: { anterior: 0.31, posterior: 0.45, left: 0.26, right: 0.33, superior: 0.38, inferior: 0.28 } },
+  { id: 'P-6177', type: 'N', ci: 76.8, width: 131.9, length: 171.8, height: 125.3, asym: 1.01, conf: 0.97, risk: 'LOW', mc_std: 0.018, probs: { N: 0.96, BP: 0.02, P: 0.01, D: 0.01 }, gradcam: { anterior: 0.08, posterior: 0.07, left: 0.09, right: 0.10, superior: 0.06, inferior: 0.05 } },
+];
+
+const TYPE_LABELS = { N: 'Normocephaly', BP: 'Brachycephaly', P: 'Plagiocephaly', D: 'Dolichocephaly' };
+const TYPE_COLORS = { N: 'var(--green)', BP: 'var(--amber)', P: 'var(--purple)', D: 'var(--red)' };
+
+let currentPatient = 0;
+
+// Build scan selector
+const selEl = document.getElementById('scan-selector');
+PATIENTS.forEach((p, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'scan-btn' + (i === 0 ? ' active' : '');
+  btn.textContent = `${p.id} (${p.type})`;
+  btn.onclick = () => selectPatient(i);
+  selEl.appendChild(btn);
+});
+
+// Model comparison chart (simulated training curves)
+function genCurve(start, end, epochs, noise) {
+  return Array.from({length: epochs}, (_, i) => {
+    const progress = i / (epochs - 1);
+    const base = start + (end - start) * (1 - Math.exp(-3 * progress));
+    return Math.min(1, base + (Math.random() - 0.5) * noise);
+  });
+}
+const epochs = 20;
+const modelChart = new Chart(document.getElementById('modelChart'), {
+  type: 'line',
+  data: {
+    labels: Array.from({length: epochs}, (_, i) => i + 1),
+    datasets: [
+      { label: 'CNN', data: genCurve(0.35, 0.82, epochs, 0.04), borderColor: '#3b82f6', borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
+      { label: 'ResNet', data: genCurve(0.30, 0.88, epochs, 0.05), borderColor: '#a78bfa', borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
+      { label: 'DenseNet', data: genCurve(0.28, 0.91, epochs, 0.04), borderColor: '#14b8a6', borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#5a5c66', font: { size: 10 } }, title: { display: true, text: 'Epoch', color: '#5a5c66', font: { size: 10 } } },
+      y: { min: 0.2, max: 1.0, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#5a5c66', font: { size: 10 }, callback: v => (v*100).toFixed(0) + '%' } }
+    }
+  }
+});
+
+// MC Dropout chart
+const mcChart = new Chart(document.getElementById('mcChart'), {
+  type: 'bar',
+  data: {
+    labels: ['N', 'BP', 'P', 'D'],
+    datasets: [{
+      label: 'Mean probability',
+      data: [0.25, 0.25, 0.25, 0.25],
+      backgroundColor: ['rgba(34,197,94,0.6)', 'rgba(245,158,11,0.6)', 'rgba(167,139,250,0.6)', 'rgba(239,68,68,0.6)'],
+      borderColor: ['#22c55e', '#f59e0b', '#a78bfa', '#ef4444'],
+      borderWidth: 1
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { display: false }, ticks: { color: '#8b8d98', font: { size: 11 } } },
+      y: { min: 0, max: 1, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#5a5c66', font: { size: 10 }, callback: v => (v*100).toFixed(0) + '%' } }
+    }
+  }
+});
+
+function generateVoxelSlice(type, sliceIdx) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32; canvas.height = 32;
+  const ctx = canvas.getContext('2d');
+
+  for (let y = 0; y < 32; y++) {
+    for (let x = 0; x < 32; x++) {
+      const cx = x - 16, cy = y - 16;
+      let r;
+      if (type === 'N') r = Math.sqrt(cx*cx + cy*cy) < 12 + Math.sin(sliceIdx*0.3)*2;
+      else if (type === 'BP') r = Math.sqrt(cx*cx*0.7 + cy*cy) < 13 + Math.sin(sliceIdx*0.3)*2;
+      else if (type === 'D') r = Math.sqrt(cx*cx + cy*cy*0.6) < 13 + Math.sin(sliceIdx*0.3)*2;
+      else r = Math.sqrt((cx-1)*(cx-1) + cy*cy) < 12 + Math.sin(sliceIdx*0.3 + cx*0.1)*3;
+
+      if (r) {
+        const v = 180 + Math.random() * 60;
+        ctx.fillStyle = `rgb(${v*0.6},${v*0.8},${v})`;
+      } else {
+        ctx.fillStyle = '#0a0d12';
+      }
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  return canvas;
+}
+
+function selectPatient(idx) {
+  currentPatient = idx;
+  const p = PATIENTS[idx];
+
+  document.querySelectorAll('.scan-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
+
+  // Metrics
+  const ciColor = p.ci > 81 ? 'var(--amber)' : p.ci < 75 ? 'var(--red)' : 'var(--green)';
+  document.getElementById('m-ci').textContent = p.ci.toFixed(1);
+  document.getElementById('m-ci').style.color = ciColor;
+
+  document.getElementById('m-class').textContent = TYPE_LABELS[p.type];
+  document.getElementById('m-class').style.color = TYPE_COLORS[p.type];
+  document.getElementById('m-class-sub').textContent = `ICD-10: Q67.${p.type === 'N' ? 'x' : p.type === 'BP' ? '6' : p.type === 'P' ? '3' : '2'}`;
+
+  document.getElementById('m-conf').textContent = (p.conf * 100).toFixed(0) + '%';
+  const confColor = p.conf > 0.8 ? 'var(--green)' : p.conf > 0.6 ? 'var(--amber)' : 'var(--red)';
+  document.getElementById('m-conf').style.color = confColor;
+  document.getElementById('conf-fill').style.width = (p.conf * 100) + '%';
+  document.getElementById('conf-fill').style.background = confColor;
+
+  const riskColors = { LOW: 'var(--green)', MODERATE: 'var(--amber)', HIGH: 'var(--red)' };
+  document.getElementById('m-risk').textContent = p.risk;
+  document.getElementById('m-risk').style.color = riskColors[p.risk];
+  const rec = p.conf > 0.8 ? 'Automated classification acceptable' : p.conf > 0.6 ? 'Clinician review recommended' : 'Mandatory specialist referral';
+  document.getElementById('m-recommend').textContent = rec;
+
+  // Voxel slices
+  const vg = document.getElementById('voxel-grid');
+  vg.innerHTML = '';
+  [6, 10, 16, 22, 26].forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'voxel-slice';
+    div.appendChild(generateVoxelSlice(p.type, s));
+    vg.appendChild(div);
+  });
+
+  // MC chart
+  const probVals = Object.values(p.probs);
+  mcChart.data.datasets[0].data = probVals;
+  mcChart.update();
+
+  // Pipeline
+  const stages = [
+    { label: 'OBJ mesh loaded', val: p.id + '.obj', active: true },
+    { label: 'Voxelization', val: '32×32×32', active: true },
+    { label: 'Cephalic index', val: 'CI = ' + p.ci.toFixed(1), active: true },
+    { label: '3D CNN inference', val: TYPE_LABELS[p.type], active: true },
+    { label: 'MC Dropout (N=50)', val: 'σ = ' + p.mc_std.toFixed(3), active: p.mc_std > 0.05 },
+    { label: 'Grad-CAM', val: p.conf > 0.8 ? 'Uniform' : 'Asymmetric', active: true },
+    { label: 'Clinical decision', val: p.risk, active: p.risk !== 'LOW' },
+  ];
+  document.getElementById('pipeline').innerHTML = stages.map((s, i) => {
+    const bg = s.active && i >= 4 ? (p.risk === 'HIGH' ? 'var(--red-dim)' : 'var(--amber-dim)') : s.active ? 'var(--teal-dim)' : 'var(--bg3)';
+    const tc = s.active && i >= 4 ? (p.risk === 'HIGH' ? 'var(--red)' : 'var(--amber)') : s.active ? 'var(--teal)' : 'var(--text3)';
+    const arrow = i < stages.length - 1 ? '<div class="pipeline-arrow">|</div>' : '';
+    return `<div class="pipeline-stage" style="background:${bg};"><span style="color:${tc};">${s.label}</span><span style="font-weight:600;color:${tc};font-size:11px;">${s.val}</span></div>${arrow}`;
+  }).join('');
+
+  // Report
+  document.getElementById('report').innerHTML = `
+    <div class="report-row"><span class="rl">Patient ID</span><span>${p.id}</span></div>
+    <div class="report-row"><span class="rl">Biparietal width</span><span>${p.width.toFixed(1)} mm</span></div>
+    <div class="report-row"><span class="rl">A-P length</span><span>${p.length.toFixed(1)} mm</span></div>
+    <div class="report-row"><span class="rl">Vertical height</span><span>${p.height.toFixed(1)} mm</span></div>
+    <div class="report-row"><span class="rl">Cephalic index</span><span style="color:${ciColor};font-weight:600;">${p.ci.toFixed(1)}</span></div>
+    <div class="report-row"><span class="rl">Asymmetry ratio</span><span>${p.asym.toFixed(2)}</span></div>
+    <div class="report-section">
+      <div class="report-row"><span class="rl">Model prediction</span><span style="color:${TYPE_COLORS[p.type]};font-weight:600;">${TYPE_LABELS[p.type]}</span></div>
+      <div class="report-row"><span class="rl">Confidence (MC)</span><span style="color:${confColor};">${(p.conf*100).toFixed(0)}%</span></div>
+      <div class="report-row"><span class="rl">Epistemic uncertainty</span><span>${p.mc_std.toFixed(4)}</span></div>
+      <div class="report-row"><span class="rl">Risk assessment</span><span style="color:${riskColors[p.risk]};font-weight:600;">${p.risk}</span></div>
+    </div>
+  `;
+
+  // Grad-CAM
+  const gc = p.gradcam;
+  const maxGC = Math.max(...Object.values(gc));
+  document.getElementById('gradcam').innerHTML = Object.entries(gc).map(([region, val]) => {
+    const pct = (val / maxGC * 100).toFixed(0);
+    const color = val > 0.3 ? 'var(--red)' : val > 0.15 ? 'var(--amber)' : 'var(--teal)';
+    return `<div style="text-align:center;">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:6px;">${region}</div>
+      <div style="height:60px;background:var(--bg);border-radius:4px;display:flex;align-items:flex-end;overflow:hidden;">
+        <div style="width:100%;height:${pct}%;background:${color};border-radius:4px 4px 0 0;transition:height 0.5s;"></div>
+      </div>
+      <div style="font-size:11px;font-weight:600;margin-top:4px;color:${color};">${(val*100).toFixed(0)}%</div>
+    </div>`;
+  }).join('');
+}
+
+selectPatient(0);
+</script>
+</body>
+</html>
